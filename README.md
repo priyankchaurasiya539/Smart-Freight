@@ -11,7 +11,6 @@ By predicting delays early, companies can avoid breaking their **SLA (Service Le
 The brain of this dashboard is a trained AI model that looks at historical shipping records, weather, and order details to calculate risks.
 
 * **Prediction Accuracy:** **89.40%** (It guesses correctly roughly 9 out of 10 times)
-* **ROC-AUC Score:** **0.91** (This means the model is highly reliable at separating high-risk shipments from safe ones)
 
 ---
 
