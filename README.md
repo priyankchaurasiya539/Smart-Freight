@@ -11,6 +11,7 @@ By predicting delays early, companies can avoid breaking their **SLA (Service Le
 The brain of this dashboard is a trained AI model that looks at historical shipping records, weather, and order details to calculate risks.
 
 * **Prediction Accuracy:** **89.40%** (It guesses correctly roughly 9 out of 10 times)
+* **ROC-AUC Score:** **0.91** (This means the model is highly reliable at separating high-risk shipments from safe ones)
 
 ---
 
@@ -30,11 +31,21 @@ SmartFreight/
 ├── data/
 │   └── DataCoSupplyChainDataset.csv  # The main data used to train the AI
 ├── Graphs/
-│   ├── Order Status Vs Risk.png     # Helpful charts from data analysis
-│   └── Shipping Mode Vs Risk.png
+│   ├── Department Distribution.png   # Charts generated from the EDA pipeline
+│   ├── Market Distribution.png
+│   ├── Order Country.png
+│   ├── Order Status Vs Risk.png
+│   ├── Order Status.png
+│   ├── Product Names.png
+│   ├── Shipping Mode Vs Risk.png
+│   └── Type Distribution.png
 ├── models/
-│   ├── processed_data_pipeline.pkl   # Saves column structure settings
-│   └── final_logistic_xgb_model.pkl  # The saved trained AI model file
+│   ├── final_xgb_model.pkl          # The updated saved trained XGBoost model file
+│   └── processed_data_pipeline.pkl   # Saves column structure settings
+├── .gitattributes
+├── .gitignore
 ├── app.py                            # The code that runs the Streamlit website UI
+├── EDA.py                            # Python code for Exploratory Data Analysis
+├── feature_data.py                   # Data preprocessing and feature engineering steps
 ├── model_training.py                 # The Python code used to train the AI
 └── requirements.txt                  # List of required packages to run the app
