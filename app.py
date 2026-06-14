@@ -6,7 +6,7 @@ artifacts = joblib.load("models/processed_data_pipeline.pkl")
 model = joblib.load("models/final_xgb_model.pkl")
 
 st.title("📦 SmartFreight: Predictive Supply Chain Dashboard")
-
+st.markdown("*A real-time Machine Learning pipeline predicting shipment delays to prevent logistics SLA breaches.*")
 st.markdown("---")
 
 #Creating columns 
