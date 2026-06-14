@@ -25,3 +25,7 @@ y_pred = xgb_clf.predict(X_test)
 acc = accuracy_score(y_test, y_pred)
 
 print("Accuracy score is:" , acc)
+
+#Save the model
+joblib.dump(xgb_clf, "models/final_xgb_model.pkl")
+print("File Saved Successfully.")
