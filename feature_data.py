@@ -3,8 +3,9 @@ import pandas as pd
 import joblib
 from sklearn.model_selection import train_test_split
 from category_encoders import TargetEncoder
+from geopy.distance import geodesic
 
-# 1. Dataset Load kiya
+# Load the dataset
 df = pd.read_csv("data/DataCoSupplyChainDataset.csv", encoding="latin1")
 df_new = df.copy()
 
@@ -23,11 +24,28 @@ unwanted_cols = [
     "Customer City", "Customer Country", "Customer Email", "Customer Fname", 
     "Customer Lname", "Customer Password", "Customer State", "Customer Street", 
     "Order Country", "order date (DateOrders)", "Order Region", "Order State", 
-    "Order Status", "Product Image", "Product Name", "shipping date (DateOrders)"
+    "Order Status", "Latitude" , "Longitude" , "Product Image", "Product Name", "shipping date (DateOrders)"
 ]
+
+#Fixed warehouse location(Latitiude , longitude)
+warehouse_coordinates = (28.6139 , 77.2090)    #Miami , USA
+
+def get_train_distance(row):
+    #if coordinates are missing then return the default middle distance
+    if pd.isna(row["Latitude"]) or pd.isna(row["Longitude"]):
+        return 5000.0
+    
+    destination = (row["Latitude"] , row["Longitude"])
+    return geodesic(warehouse_coordinates , destination).kilometers
+
+
+#New numeric column in the dataset
+df_new["Distance_KM"] = df_new.apply(get_train_distance , axis=1) 
 
 X = df_new.drop(columns=unwanted_cols,  errors='ignore')
 y_clf = df_new["Late_delivery_risk"]
+
+
 
 #train_test_split 
 X_train, X_test, y_train_clf, y_test_clf = train_test_split(

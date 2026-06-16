@@ -1,6 +1,8 @@
 import pandas as pd 
 import streamlit as st
 import joblib
+from geopy.geocoders import Nominatim
+from geopy.distance import geodesic
 
 artifacts = joblib.load("models/processed_data_pipeline.pkl")
 model = joblib.load("models/final_xgb_model.pkl")
@@ -23,8 +25,32 @@ with col1 :
 with col2 :
     type = st.selectbox("Type Of Transaction" , ["DEBIT", "TRANSFER", "CASH", "PAYMENT"])
 
-    order_city = st.selectbox("Order City" , ["Caguas", "Chicago", "Los Angeles", "Brooklyn", "New York" , "Houston" , "San Diego" , "Bronx" , "San Francisco" , "Philadelphia", "Las Vegas", "Phoenix", "Detroit", "Dallas", 
-    "Seattle", "Boston", "Atlanta", "San Jose", "Columbus" , "London", "Paris", "Mainz", "Dortmund", "Santo Domingo", "San Juan" , "Austin", "Denver", "Miami", "San Antonio", "Jacksonville","Indianapolis", "San Francisco", "Austin", "Fort Worth", "Charlotte"])
+    st.subheader("Route Configuration")
+
+    #Manual city input
+    user_city = st.text_input("Enter the destination city")
+
+    #Default value 
+    distance_Km = 5000.0
+
+    #Calculate distance if user types a city 
+    if user_city:
+        locator = Nominatim(user_agent="my_simple_app")
+        location = locator.geocode(user_city)
+
+        if location is not None:
+            city_coords = (location.latitude , location.longitude)
+            warehouse_coordinates = (28.6139, 77.2090)
+
+
+            #Calculate the real life distance 
+            distance_Km = geodesic(warehouse_coordinates , city_coords).kilometers
+
+            st.success(f"City Found: {location.address}")
+            st.metric(label="Calculated Shipping Distance" , value=f"{distance_Km:.2f} KM")
+
+        else :
+            st.error("City Not Found , try with the another city that is nearest to destination.")
 
     category_name = st.selectbox("Category" , ["Accessories", "As Seen on TV!", "Baby ", "Baseball & Softball", "Basketball", "Books", "Cameras", "Camping & Hiking", "Cardio Equipment", "Children's Clothing", "Cleats", "Consumer Electronics", "Crafts", "Computers", "DVDs", "Electronics", "Fishing", "Fitness Accessories", "Garden", "Girls' Apparel", "Golf Bags & Carts", "Golf Balls", "Golf Gloves", "Golf Shoes", "Hunting & Shooting", "Indoor/Outdoor Games", "Kids' Golf Clubs", "Lacrosse", "Men's Footwear", "Music", "Musical Instruments", "Pet Supplies", "Product", "Record Players", "Robotics", "Soccer", "Sporting Goods", "Strength Training", "Striking Bags", "Tennis & Racquet", "Toys", "Trade In", "Video Games", "Water Sports", "Women's Apparel"])
 
@@ -43,7 +69,7 @@ if st.button("🚀 Predict Shipment Delay Risk", use_container_width=True):
     input_df = pd.DataFrame([{
         'Type': type,
         'Shipping Mode': shipping_mode,
-        'Order City': order_city,
+        'Order City': user_city,
         'Category Name': category_name,
         'Customer Segment': customer_segment,
         'Department Name': departments,
@@ -53,7 +79,8 @@ if st.button("🚀 Predict Shipment Delay Risk", use_container_width=True):
         'Order Item Quantity': Order_item_quantity,
         'Product Price': Product_Price,
         'Origin_Weather_Current': weather,
-        'Dest_Weather_Risk_Score': Dest_weather_risk_score
+        'Dest_Weather_Risk_Score': Dest_weather_risk_score,
+        'Distance_KM': distance_Km
     }])
 
     
