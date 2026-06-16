@@ -34,23 +34,37 @@ with col2 :
     distance_Km = 5000.0
 
     #Calculate distance if user types a city 
+    # --- FIXED GEOCODER BLOCK WITH TIMEOUT & FAIL-SAFE ---
     if user_city:
-        locator = Nominatim(user_agent="my_simple_app")
-        location = locator.geocode(user_city)
-
-        if location is not None:
-            city_coords = (location.latitude , location.longitude)
-            warehouse_coordinates = (28.6139, 77.2090)
-
-
-            #Calculate the real life distance 
-            distance_Km = geodesic(warehouse_coordinates , city_coords).kilometers
-
-            st.success(f"City Found: {location.address}")
-            st.metric(label="Calculated Shipping Distance" , value=f"{distance_Km:.2f} KM")
-
-        else :
-            st.error("City Not Found , try with the another city that is nearest to destination.")
+        try:
+            # 1. Added a highly unique user_agent to prevent public rate-limiting blocks
+            locator = Nominatim(user_agent="mnnit_smart_freight_v2_system")
+            
+            # 2. Added explicit timeout of 10 seconds so it doesn't drop connection early
+            location = locator.geocode(user_city, timeout=10)
+            
+            if location is not None:
+                city_coords = (location.latitude, location.longitude)
+                warehouse_coordinates = (28.6139, 77.2090)  # Delhi Hub
+                
+                distance_Km = geodesic(warehouse_coordinates, city_coords).kilometers
+                
+                st.success(f"City Found: {location.address}")
+                st.markdown(
+                    f"""
+                    <p style="margin-bottom: 0px; color: gray; font-size: 14px;">Calculated Shipping Distance</p>
+                    <h2 style="margin-top: 0px; font-size: 24px; font-weight: bold;">{distance_Km:.2f} KM</h2>
+                    """, 
+                    unsafe_allow_html=True
+                )
+            else:
+                st.error("City coordinates not found. Using fallback baseline analytics.")
+                distance_Km = 5000.0  # Fallback standard
+                
+        except Exception as e:
+            # 3. Fail-safe catcher: If Geopy servers are down, your app will NOT crash!
+            st.warning("⚠️ Geocoding service is temporarily busy. Proceeding with standard routing distance.")
+            distance_Km = 5000.0  # Fallback to prevent crash
 
     category_name = st.selectbox("Category" , ["Accessories", "As Seen on TV!", "Baby ", "Baseball & Softball", "Basketball", "Books", "Cameras", "Camping & Hiking", "Cardio Equipment", "Children's Clothing", "Cleats", "Consumer Electronics", "Crafts", "Computers", "DVDs", "Electronics", "Fishing", "Fitness Accessories", "Garden", "Girls' Apparel", "Golf Bags & Carts", "Golf Balls", "Golf Gloves", "Golf Shoes", "Hunting & Shooting", "Indoor/Outdoor Games", "Kids' Golf Clubs", "Lacrosse", "Men's Footwear", "Music", "Musical Instruments", "Pet Supplies", "Product", "Record Players", "Robotics", "Soccer", "Sporting Goods", "Strength Training", "Striking Bags", "Tennis & Racquet", "Toys", "Trade In", "Video Games", "Water Sports", "Women's Apparel"])
 
