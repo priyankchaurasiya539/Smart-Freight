@@ -20,6 +20,15 @@ The brain of this dashboard is a trained AI model that looks at historical shipp
 * **Compact 3-Column Layout:** All inputs fit perfectly on a single screen without annoying scrolling.
 * **Smart Alert Colors:** The output automatically changes color based on the risk level (Green for safe, Orange for warning, Red for high danger).
 * **Risk Delta Counter:** Shows you exactly how much safer or riskier your current shipment is compared to a normal baseline.
+* **REST API Backend:** FastAPI layer with Pydantic validation exposes a `/predict` endpoint for programmatic risk scoring, independent of the Streamlit UI.
+---
+
+⚙️ Backend API (FastAPI)
+
+On top of the Streamlit UI, the model is also served through a FastAPI backend — so risk predictions aren't locked inside a dashboard and can be consumed by any external service, script, or frontend.
+- **Endpoint:** `POST /predict` — accepts shipment details and returns delay risk %
+- **Validation:** Pydantic schema enforces correct types/values across all 43 product categories, 11 departments, 3 customer segments, 4 shipping modes, 5 markets, and 4 weather types
+- **Why it matters:** Decouples the ML model from the UI — the same prediction logic can power a web app, a mobile app, or a batch job without touching Streamlit code
 
 ---
 
@@ -43,6 +52,7 @@ SmartFreight/
 │   └── processed_data_pipeline.pkl   # Saves column structure settings
 ├── .gitattributes
 ├── .gitignore
+├── FastAPI.py                        #FastAPI app entrypoint, defines the /predict endpoint
 ├── app.py                            # The code that runs the Streamlit website UI
 ├── EDA.py                            # Python code for Exploratory Data Analysis
 ├── feature_data.py                   # Data preprocessing and feature engineering steps
