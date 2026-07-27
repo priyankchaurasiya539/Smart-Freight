@@ -12,6 +12,7 @@ The brain of this dashboard is a trained AI model that looks at historical shipp
 
 * **Prediction Accuracy:** **89.40%** (It guesses correctly roughly 9 out of 10 times)
 
+
 ---
 
 ## 🚀 Key Features
