@@ -1,3 +1,4 @@
+import os
 import streamlit as st
 import requests
 from datetime import datetime, timedelta
@@ -166,9 +167,9 @@ with col2:
 
     if destination_city.strip():
         try:
-            # Enable addressdetails=True to get raw country details
-            geolocator = Nominatim(user_agent="smartfreight_arrival_tracker", timeout=10)
-            location = geolocator.geocode(destination_city.strip(), timeout=10, addressdetails=True , language="en")
+            # language="en" forces English city and country names
+            geolocator = Nominatim(user_agent="smartfreight_arrival_tracker_v4", timeout=10)
+            location = geolocator.geocode(destination_city.strip(), timeout=10, addressdetails=True, language="en")
 
             if location is not None:
                 city_coords = (location.latitude, location.longitude)
@@ -235,7 +236,7 @@ with col3:
     transaction_type = st.selectbox("Type Of Transaction", ["DEBIT", "TRANSFER", "CASH", "PAYMENT"])
     shipping_mode = st.selectbox("Shipping Mode", ["Standard Class", "Second Class", "First Class", "Same Day"])
 
-    # 4. MARKET REGION SELECTBOX (AUTOMATICALLY SYNCED TO DETECTED CITY REGION)
+    # MARKET REGION (AUTOMATICALLY SYNCED)
     market_options = ["Pacific Asia", "USCA", "Europe", "LATAM", "Africa"]
     default_market_idx = market_options.index(detected_market) if detected_market in market_options else 0
     
@@ -256,7 +257,7 @@ with col3:
     days_scheduled = st.slider("Scheduled Shipping Days (Transit Time)", min_value=1, max_value=5, value=2)
 
 # ---------------------------------------------------------
-# 5. PREDICTION CALL VIA FASTAPI
+# 4. PREDICTION CALL (WITH AUTOMATIC SMART FALLBACK)
 # ---------------------------------------------------------
 st.write("")
 if st.button("🚀 Predict Shipment Delay Risk", use_container_width=True):
@@ -277,7 +278,7 @@ if st.button("🚀 Predict Shipment Delay Risk", use_container_width=True):
             "destination_weather_risk": float(arrival_weather_info["risk_score"]),
             "type_of_transaction": transaction_type,
             "shipping_mode": shipping_mode,
-            "market": market,                                  # Auto-synced region!
+            "market": market,
             "destination_city": destination_city.strip(),
             "days_scheduled": int(days_scheduled),
             "weather": arrival_weather_info["category"],
@@ -287,50 +288,113 @@ if st.button("🚀 Predict Shipment Delay Risk", use_container_width=True):
             "distance_km": float(calculated_distance_km)
         }
 
+        data = None
+
+        # 1. Attempt connection to FastAPI REST backend
         try:
             with st.spinner(f"Scoring delay risk for {destination_city.title()} ({market} route)..."):
-                response = requests.post(FASTAPI_URL, json=payload, timeout=12)
+                response = requests.post(FASTAPI_URL, json=payload, timeout=3)
+                if response.status_code == 200:
+                    data = response.json()
+        except Exception:
+            pass  # Fallback to local model if FastAPI is offline (e.g. Streamlit Cloud)
 
-            if response.status_code == 200:
-                data = response.json()
-                total_risk = data["delay_risk_percent"]
-                base_risk = data["base_operational_risk"]
-                weather_penalty = data["weather_penalty_percent"]
-                risk_level = data["risk_level"]
-                risk_delta_str = data["risk_delta"]
-                confidence = data["model_confidence"]
-                explanation = data["weather_explanation"]
+        # 2. Smart Fallback: Local model execution if FastAPI backend is not running
+        if data is None:
+            try:
+                import joblib
+                import pandas as pd
+                
+                base_dir = os.path.dirname(os.path.abspath(__file__))
+                model_file = os.path.join(base_dir, "models", "final_xgb_model.pkl")
+                pipeline_file = os.path.join(base_dir, "models", "processed_data_pipeline.pkl")
 
-                st.markdown("### 📊 Live Risk Assessment & Root Cause Breakdown")
+                xgb_model = joblib.load(model_file)
+                artifacts = joblib.load(pipeline_file)
+                X_train_cols = artifacts["X_train_encoded"].columns
 
-                m1, m2, m3 = st.columns(3)
-                m1.metric("Total Delay Probability", f"{total_risk:.2f}%", delta=f"{risk_delta_str} vs Baseline", delta_color="inverse")
-                m2.metric("Base Operational Transit Risk", f"{base_risk:.2f}%", help="Delay risk assuming normal, clear weather conditions.")
-                m3.metric("Weather Delay Penalty", f"+{weather_penalty:.2f}%", delta=f"{arrival_weather_info['category']} Alert" if weather_penalty > 0 else "Clear Skies", delta_color="inverse")
+                base_dict = {
+                    'Type': transaction_type,
+                    'Shipping Mode': shipping_mode,
+                    'Market': market,
+                    'Order City': destination_city.strip(),
+                    'Days for shipment (scheduled)': days_scheduled,
+                    'Category Name': category_name,
+                    'Customer Segment': customer_segment,
+                    'Department Name': departments,
+                    'Departments': departments,
+                    'Sales per customer': float(sales_per_customer),
+                    'Order Item Quantity': float(order_item_quantity),
+                    'Product Price': float(product_price),
+                    'Distance_KM': float(calculated_distance_km)
+                }
 
-                if weather_penalty > 0:
-                    st.warning(f"{explanation}\n\n**Rainfall Expected:** `{arrival_weather_info['precip_mm']} mm` ({arrival_weather_info['rain_prob']}% chance) on **{arrival_weather_info['arrival_date']}**.")
-                else:
-                    st.success(explanation)
+                def predict_risk(weather_cond, weather_score):
+                    d = base_dict.copy()
+                    d['Weather'] = weather_cond
+                    d['Dest_Weather_Risk_Score'] = weather_score
+                    d['Dest Weather Risk Score'] = weather_score
+                    d['Origin Weather Current'] = weather_score
+                    df = pd.DataFrame([d])
+                    enc = pd.get_dummies(df).reindex(columns=X_train_cols, fill_value=0.0)
+                    return round(float(xgb_model.predict_proba(enc)[0][1] * 100.0), 2)
 
-                st.markdown("### 🗺️ Live Operational Trajectory")
-                if total_risk >= 70.0:
-                    badge_color = "#d9534f"
-                elif 35.0 <= total_risk < 70.0:
-                    badge_color = "#f0ad4e"
-                else:
-                    badge_color = "#5cb85c"
+                base_risk = predict_risk("Clear", 0.10)
+                actual_risk = predict_risk(arrival_weather_info["category"], arrival_weather_info["risk_score"])
+                weather_penalty = max(0.0, round(actual_risk - base_risk, 2))
 
-                st.markdown(
-                    f'<span style="background-color:{badge_color}; color:white; padding:6px 14px; border-radius:4px; font-weight:bold; font-size:15px;">{risk_level}</span>',
-                    unsafe_allow_html=True
-                )
+                risk_level = "CRITICAL SLA RISK" if actual_risk >= 70.0 else ("MODERATE CAUTION ZONE" if actual_risk >= 35.0 else "STABLE OPTIMAL ROUTE")
+                delta_val = actual_risk - 50.0
+                delta_str = f"+{delta_val:.1f}%" if delta_val > 0 else f"{delta_val:.1f}%"
 
-                st.progress(max(0, min(100, int(total_risk))))
-                st.caption(f"System Matrix Factor: {total_risk:.2f}% | Model Confidence: {confidence * 100:.0f}%")
+                explanation = f"⚠️ Delay probability increased by +{weather_penalty:.1f}% due to adverse weather ({arrival_weather_info['category']}) forecasted on arrival." if weather_penalty > 0 else "✅ Optimal weather conditions forecasted upon arrival; 0% delay penalty."
 
+                data = {
+                    "delay_risk_percent": actual_risk,
+                    "base_operational_risk": base_risk,
+                    "weather_penalty_percent": weather_penalty,
+                    "risk_level": risk_level,
+                    "risk_delta": delta_str,
+                    "model_confidence": round(abs(actual_risk - 50.0) / 50.0, 2),
+                    "weather_explanation": explanation
+                }
+            except Exception as e:
+                st.error(f"Inference error: {str(e)}")
+
+        # 3. Render Dashboard Metrics
+        if data:
+            total_risk = data["delay_risk_percent"]
+            base_risk = data["base_operational_risk"]
+            weather_penalty = data["weather_penalty_percent"]
+            risk_level = data["risk_level"]
+            risk_delta_str = data["risk_delta"]
+            confidence = data["model_confidence"]
+            explanation = data["weather_explanation"]
+
+            st.markdown("### 📊 Live Risk Assessment & Root Cause Breakdown")
+
+            m1, m2, m3 = st.columns(3)
+            m1.metric("Total Delay Probability", f"{total_risk:.2f}%", delta=f"{risk_delta_str} vs Baseline", delta_color="inverse")
+            m2.metric("Base Operational Transit Risk", f"{base_risk:.2f}%", help="Delay risk assuming normal, clear weather conditions.")
+            m3.metric("Weather Delay Penalty", f"+{weather_penalty:.2f}%", delta=f"{arrival_weather_info['category']} Alert" if weather_penalty > 0 else "Clear Skies", delta_color="inverse")
+
+            if weather_penalty > 0:
+                st.warning(f"{explanation}\n\n**Rainfall Expected:** `{arrival_weather_info['precip_mm']} mm` ({arrival_weather_info['rain_prob']}% chance) on **{arrival_weather_info['arrival_date']}**.")
             else:
-                st.error(f"Backend Server Error ({response.status_code}): {response.text}")
+                st.success(explanation)
 
-        except requests.exceptions.ConnectionError:
-            st.error("🚨 Cannot connect to FastAPI backend! Please run: `uvicorn FastAPI:app --reload`")
+            st.markdown("### 🗺️ Live Operational Trajectory")
+            if total_risk >= 70.0:
+                badge_color = "#d9534f"
+            elif 35.0 <= total_risk < 70.0:
+                badge_color = "#f0ad4e"
+            else:
+                badge_color = "#5cb85c"
+
+            st.markdown(
+                f'<span style="background-color:{badge_color}; color:white; padding:6px 14px; border-radius:4px; font-weight:bold; font-size:15px;">{risk_level}</span>',
+                unsafe_allow_html=True
+            )
+
+            st.progress(max(0, min(100, int(total_risk))))
+            st.caption(f"System Matrix Factor: {total_risk:.2f}% | Model Confidence: {confidence * 100:.0f}%")
