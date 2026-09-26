@@ -6,3 +6,7 @@ xgboost
 plotly
 geopy
 category_encoders
+fastapi
+uvicorn
+requests
+pydantic
