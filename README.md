@@ -31,6 +31,9 @@ In modern global logistics, transit delays breach strict **Service Level Agreeme
 
 ---
 
+## 📁 Repository Structure
+
+```text
 SmartFreight/
 ├── data/
 │   └── DataCoSupplyChainDataset.csv    # Source training dataset
@@ -44,7 +47,7 @@ SmartFreight/
 ├── model_training.py                   # Model training and validation script
 ├── requirements.txt                    # Project dependencies
 └── README.md                           # Documentation
-
+```
 
 
 ## 🏗️ System Architecture
