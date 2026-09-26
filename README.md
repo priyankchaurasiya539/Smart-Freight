@@ -47,16 +47,3 @@ flowchart LR
 
 
 
-SmartFreight/
-├── data/
-│   └── DataCoSupplyChainDataset.csv    # Source training dataset
-├── models/
-│   ├── final_xgb_model.pkl             # Trained XGBoost model artifact
-│   └── processed_data_pipeline.pkl     # Encoded column schema
-├── FastAPI.py                          # High-performance REST API backend
-├── app.py                              # Streamlit dashboard client
-├── EDA.py                              # Exploratory data analysis scripts
-├── feature_data.py                     # Feature engineering pipeline
-├── model_training.py                   # Model training and validation script
-├── requirements.txt                    # Project dependencies
-└── README.md                           # Documentation
