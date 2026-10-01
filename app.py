@@ -16,14 +16,27 @@ st.set_page_config(
 )
 
 FASTAPI_URL = "http://127.0.0.1:8000/predict"
-WAREHOUSE_COORDS = (28.6139, 77.2090)  # Origin Hub: New Delhi HQ (Lat, Lon)
+
+# ---------------------------------------------------------
+# NATIONAL WAREHOUSE NETWORK DEFINITION
+# ---------------------------------------------------------
+WAREHOUSE_HUBS = {
+    "Delhi Hub (North HQ)": {"coords": (28.6139, 77.2090), "code": "DEL", "region": "North"},
+    "Mumbai Hub (West)": {"coords": (19.0760, 72.8777), "code": "BOM", "region": "West"},
+    "Bengaluru Hub (South)": {"coords": (12.9716, 77.5946), "code": "BLR", "region": "South"},
+    "Kolkata Hub (East)": {"coords": (22.5726, 88.3639), "code": "CCU", "region": "East"}
+}
 
 # Initialize Session State for cross-page route synchronization
 if "route_data" not in st.session_state:
     st.session_state["route_data"] = {
+        "origin_name": "Delhi Hub (North HQ)",
+        "origin_coords": (28.6139, 77.2090),
         "city": "Mumbai",
         "coords": (19.0760, 72.8777),
         "distance_km": 1147.02,
+        "optimal_hub": "Mumbai Hub (West)",
+        "optimal_dist": 0.0,
         "risk_percent": 29.12,
         "base_risk": 27.04,
         "weather_penalty": 2.08,
@@ -184,24 +197,45 @@ if current_page == "📄 Page 1: Risk Assessment Calculator":
         product_price = st.number_input("Product Price (₹)", min_value=10, max_value=2000, value=10)
         customer_segment = st.selectbox("Customer Segment", ["Consumer", "Corporate", "Home Office"])
 
+    # Dynamic variables
     calculated_distance_km = 500.0
     destination_coords = (19.0760, 72.8777)
     arrival_weather_info = None
     detected_market = "Pacific Asia"
     detected_country = "India"
+    optimal_hub = "Delhi Hub (North HQ)"
+    optimal_distance = 500.0
 
     with col2:
-        st.subheader("Route & Arrival Weather 🛰️")
-        destination_city = st.text_input("Enter Destination City (e.g. Mumbai, New York, London)", value="Mumbai")
+        st.subheader("Route & Origin Hub 🛰️")
+        
+        # 1. ORIGIN WAREHOUSE SELECTOR
+        selected_origin_hub = st.selectbox(
+            "🏭 Dispatch Origin Warehouse Hub",
+            list(WAREHOUSE_HUBS.keys()),
+            index=0,
+            help="Select the regional warehouse facility dispatching this consignment."
+        )
+        origin_coords = WAREHOUSE_HUBS[selected_origin_hub]["coords"]
+
+        destination_city = st.text_input("Enter Destination City (e.g. Chennai, Mumbai, Lahore, New York)", value="Chennai")
 
         if destination_city.strip():
             try:
-                geolocator = Nominatim(user_agent="smartfreight_arrival_tracker_v6", timeout=10)
+                geolocator = Nominatim(user_agent="smartfreight_arrival_tracker_v7", timeout=10)
                 location = geolocator.geocode(destination_city.strip(), timeout=10, addressdetails=True, language="en")
 
                 if location is not None:
                     destination_coords = (location.latitude, location.longitude)
-                    calculated_distance_km = round(geodesic(WAREHOUSE_COORDS, destination_coords).kilometers, 2)
+                    calculated_distance_km = round(geodesic(origin_coords, destination_coords).kilometers, 2)
+
+                    # Compute distances from ALL hubs to find optimal hub
+                    hub_distances = {
+                        name: round(geodesic(info["coords"], destination_coords).kilometers, 2)
+                        for name, info in WAREHOUSE_HUBS.items()
+                    }
+                    optimal_hub = min(hub_distances, key=hub_distances.get)
+                    optimal_distance = hub_distances[optimal_hub]
 
                     address_dict = location.raw.get("address", {})
                     detected_country = address_dict.get("country", "Unknown")
@@ -209,16 +243,26 @@ if current_page == "📄 Page 1: Risk Assessment Calculator":
                     detected_market = detect_market_region(country_code, detected_country)
 
                     st.success(f"📍 **Destination:** {location.address}")
+                    
                     st.markdown(
                         f"""
                         <div style="background-color:#1e293b; padding:10px 14px; border-radius:8px; margin-bottom:12px;">
-                            <span style="color:#94a3b8; font-size:13px;">Transit Distance from Delhi Hub:</span>
+                            <span style="color:#94a3b8; font-size:13px;">Transit Distance from {selected_origin_hub}:</span>
                             <h4 style="margin:2px 0 0 0; color:#38bdf8;">{calculated_distance_km:,.2f} KM</h4>
                             <span style="color:#a7f3d0; font-size:12px;">🌍 Auto-detected Region: <b>{detected_market}</b> ({detected_country})</span>
                         </div>
                         """,
                         unsafe_allow_html=True
                     )
+
+                    # SMART NEAREST-HUB AUTO-RECOMMENDER
+                    if selected_origin_hub != optimal_hub and calculated_distance_km > (optimal_distance + 50):
+                        dist_saved = calculated_distance_km - optimal_distance
+                        st.warning(
+                            f"💡 **Network Routing Alert:**\n\n"
+                            f"Shipping from **{selected_origin_hub}** requires `{calculated_distance_km:,.1f} KM`.\n\n"
+                            f"Rerouting via **{optimal_hub}** ({optimal_distance:,.1f} KM) cuts transit by **{dist_saved:,.1f} KM**, significantly lowering delay risk & SLA penalties!"
+                        )
 
                     days_scheduled_preview = 2
                     arrival_weather_info = fetch_arrival_weather_forecast(
@@ -302,7 +346,7 @@ if current_page == "📄 Page 1: Risk Assessment Calculator":
 
             data = None
             try:
-                with st.spinner(f"Scoring delay risk for {destination_city.title()} ({market} route)..."):
+                with st.spinner(f"Scoring delay risk from {selected_origin_hub} to {destination_city.title()}..."):
                     response = requests.post(FASTAPI_URL, json=payload, timeout=3)
                     if response.status_code == 200:
                         data = response.json()
@@ -357,11 +401,15 @@ if current_page == "📄 Page 1: Risk Assessment Calculator":
                     st.error(f"Inference error: {str(e)}")
 
             if data:
-                # Update Session State for Page 2
+                # Synchronize to Session State for Page 2
                 st.session_state["route_data"] = {
+                    "origin_name": selected_origin_hub,
+                    "origin_coords": origin_coords,
                     "city": destination_city.title(),
                     "coords": destination_coords,
                     "distance_km": calculated_distance_km,
+                    "optimal_hub": optimal_hub,
+                    "optimal_dist": optimal_distance,
                     "risk_percent": data["delay_risk_percent"],
                     "base_risk": data["base_operational_risk"],
                     "weather_penalty": data["weather_penalty_percent"],
@@ -401,14 +449,16 @@ if current_page == "📄 Page 1: Risk Assessment Calculator":
 
 
 # =========================================================
-# PAGE 2: DEDICATED 3D GEOSPATIAL TRANSIT MAP
+# PAGE 2: DEDICATED 3D GEOSPATIAL TRANSIT & NETWORK MAP
 # =========================================================
 elif current_page == "🗺️ Page 2: 3D Route Telemetry Map":
-    st.title("🗺️ 3D Geospatial Route & Telemetry Center")
-    st.markdown("Global 3D flight and freight corridor visualization powered by WebGL & Pydeck.")
+    st.title("🗺️ 3D Geospatial Route & Network Center")
+    st.markdown("Global 3D freight corridor visualization with fulfillment network topology powered by WebGL & Pydeck.")
     st.write("---")
 
     active_route = st.session_state["route_data"]
+    origin_name = active_route["origin_name"]
+    origin_coords = active_route["origin_coords"]
     dest_coords = active_route["coords"]
     total_risk = active_route["risk_percent"]
     risk_level = active_route["risk_level"]
@@ -416,10 +466,10 @@ elif current_page == "🗺️ Page 2: 3D Route Telemetry Map":
 
     # Top KPI Metrics on Page 2
     kpi1, kpi2, kpi3, kpi4 = st.columns(4)
-    kpi1.metric("Origin Hub", "New Delhi HQ (DEL)", "Primary Dispatch Hub")
+    kpi1.metric("Dispatch Hub", origin_name, f"Hub Network Node")
     kpi2.metric(f"Destination: {active_route['city']}", f"{distance_km:,.1f} KM", f"{active_route['market']} Region")
     kpi3.metric("Live Delay Probability", f"{total_risk:.2f}%", active_route["risk_level"], delta_color="inverse")
-    kpi4.metric("Weather Impact", f"+{active_route['weather_penalty']:.2f}%", active_route["weather_desc"])
+    kpi4.metric("Nearest Optimal Hub", active_route["optimal_hub"], f"{active_route['optimal_dist']:,.1f} KM")
 
     st.write("")
 
@@ -431,34 +481,37 @@ elif current_page == "🗺️ Page 2: 3D Route Telemetry Map":
     else:
         arc_rgb = [92, 184, 92, 240]        # Green
 
-    origin_coords_lonlat = [WAREHOUSE_COORDS[1], WAREHOUSE_COORDS[0]]
-    dest_coords_lonlat = [dest_coords[1], dest_coords[0]]
+    origin_lonlat = [origin_coords[1], origin_coords[0]]
+    dest_lonlat = [dest_coords[1], dest_coords[0]]
 
-    # 3D Arc Dataset
+    # 1. 3D Flight / Transit Arc
     arc_data = [{
-        "from": origin_coords_lonlat,
-        "to": dest_coords_lonlat,
-        "name": f"Freight Corridor: New Delhi ➔ {active_route['city']}",
-        "info": f"Transit Distance: {distance_km:,.1f} KM | Risk: {total_risk:.1f}% ({risk_level})"
+        "from": origin_lonlat,
+        "to": dest_lonlat,
+        "name": f"Corridor: {origin_name} ➔ {active_route['city']}",
+        "info": f"Distance: {distance_km:,.1f} KM | Risk: {total_risk:.1f}% ({risk_level})"
     }]
 
-    # Markers Dataset
-    scatter_data = [
-        {
-            "position": origin_coords_lonlat,
-            "name": "🏭 Central Warehouse: New Delhi HQ",
-            "info": "Dispatch Coordinates: (28.6139° N, 77.2090° E)",
-            "color": [56, 189, 248, 240],   # Bright Cyan
-            "radius": 40000
-        },
-        {
-            "position": dest_coords_lonlat,
-            "name": f"📍 Destination Hub: {active_route['city']}, {active_route['country']}",
-            "info": f"Delay Probability: {total_risk:.1f}% | Weather: {active_route['weather_desc']}",
-            "color": arc_rgb,               # Dynamic Risk Color
-            "radius": 50000
-        }
-    ]
+    # 2. National Hub Network Scatter Nodes (Shows entire fulfillment grid!)
+    hub_nodes = []
+    for h_name, h_info in WAREHOUSE_HUBS.items():
+        is_active = (h_name == origin_name)
+        hub_nodes.append({
+            "position": [h_info["coords"][1], h_info["coords"][0]],
+            "name": f"🏭 {h_name}",
+            "info": f"Active Dispatch Center: {'YES' if is_active else 'STANDBY'} ({h_info['region']} Sector)",
+            "color": [56, 189, 248, 255] if is_active else [148, 163, 184, 180],
+            "radius": 45000 if is_active else 25000
+        })
+
+    # Add destination node
+    hub_nodes.append({
+        "position": dest_lonlat,
+        "name": f"📍 Destination Hub: {active_route['city']}, {active_route['country']}",
+        "info": f"Delay Probability: {total_risk:.1f}% | Weather: {active_route['weather_desc']}",
+        "color": arc_rgb,
+        "radius": 50000
+    })
 
     arc_layer = pdk.Layer(
         "ArcLayer",
@@ -474,7 +527,7 @@ elif current_page == "🗺️ Page 2: 3D Route Telemetry Map":
 
     scatter_layer = pdk.Layer(
         "ScatterplotLayer",
-        data=scatter_data,
+        data=hub_nodes,
         get_position="position",
         get_fill_color="color",
         get_radius="radius",
@@ -483,8 +536,8 @@ elif current_page == "🗺️ Page 2: 3D Route Telemetry Map":
     )
 
     # Dynamic camera positioning
-    mid_lat = (WAREHOUSE_COORDS[0] + dest_coords[0]) / 2.0
-    mid_lon = (WAREHOUSE_COORDS[1] + dest_coords[1]) / 2.0
+    mid_lat = (origin_coords[0] + dest_coords[0]) / 2.0
+    mid_lon = (origin_coords[1] + dest_coords[1]) / 2.0
 
     if distance_km < 600:
         zoom_lvl = 5.5
@@ -512,5 +565,5 @@ elif current_page == "🗺️ Page 2: 3D Route Telemetry Map":
         tooltip={"text": "{name}\n{info}"}
     )
 
-    # Full-width 3D Map Rendering on Page 2
+    # Full-width 3D Map Rendering
     st.pydeck_chart(deck_chart)
